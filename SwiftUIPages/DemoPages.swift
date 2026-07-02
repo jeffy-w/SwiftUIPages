@@ -72,6 +72,11 @@ public struct DemoPages: View {
                 } label: {
                     DemoLabel(title: "Image Thumb")
                 }
+                NavigationLink {
+                    UploadSpeedWidgetView()
+                } label: {
+                    DemoLabel(title: "Upload Speed Widget")
+                }
 
             }
             .navigationTitle(Text("APP_NAME"))
