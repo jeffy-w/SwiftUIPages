@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		9E117D1D2D2135BC001EE3C9 /* Vendors in Frameworks */ = {isa = PBXBuildFile; productRef = 9E117D1C2D2135BC001EE3C9 /* Vendors */; };
 		9E58DF2F2E7963480096040C /* FVendors in Frameworks */ = {isa = PBXBuildFile; productRef = 9E58DF2E2E7963480096040C /* FVendors */; };
+		9E58DF302E7963490096040D /* FVendorsExt in Frameworks */ = {isa = PBXBuildFile; productRef = 9E58DF312E7963490096040D /* FVendorsExt */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -61,6 +62,7 @@
 			files = (
 				9E117D1D2D2135BC001EE3C9 /* Vendors in Frameworks */,
 				9E58DF2F2E7963480096040C /* FVendors in Frameworks */,
+				9E58DF302E7963490096040D /* FVendorsExt in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -132,9 +134,8 @@
 			name = SwiftUIPages;
 			packageProductDependencies = (
 				9E117D1C2D2135BC001EE3C9 /* Vendors */,
-				9E58DE262E7955C30096040C /* FVendorsSwiftUI */,
-				9E58DE2C2E795D8F0096040C /* FVendorsUIKit */,
 				9E58DF2E2E7963480096040C /* FVendors */,
+				9E58DF312E7963490096040D /* FVendorsExt */,
 			);
 			productName = SwiftUIPages;
 			productReference = 9E117CB22D213299001EE3C9 /* SwiftUIPages.app */;
@@ -644,17 +645,13 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = Vendors;
 		};
-		9E58DE262E7955C30096040C /* FVendorsSwiftUI */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = FVendorsSwiftUI;
-		};
-		9E58DE2C2E795D8F0096040C /* FVendorsUIKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = FVendorsUIKit;
-		};
 		9E58DF2E2E7963480096040C /* FVendors */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = FVendors;
+		};
+		9E58DF312E7963490096040D /* FVendorsExt */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = FVendorsExt;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
