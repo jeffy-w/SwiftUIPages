@@ -9,10 +9,12 @@
 //  Created by jeffy on 9/17/25.
 //
 
-import PhotosUI
-import SwiftUI
 import CoreImage
-
+import ImageIO
+import PhotosUI
+import Photos
+import SwiftUI
+import UniformTypeIdentifiers
 
 struct ImageThumbView: View {
     @Environment(\.displayScale) var displayScale
@@ -92,6 +94,7 @@ struct ImageThumbView: View {
                     PhotosPicker(
                         selection: $selectedItem,
                         matching: .images,
+                        preferredItemEncoding: .current,
                         photoLibrary: .shared()
                     ) {
                         RoundedRectangle(cornerRadius: 8)
@@ -122,18 +125,18 @@ struct ImageThumbView: View {
         .onChange(of: selectedItem) { _, newItem in
             if let newItem {
                 Task {
-                    // 选图时赋值
-                    if let data = try? await newItem.loadTransferable(type: Data.self),
-                        let image = UIImage(data: data, scale: displayScale)
+                    let data = await loadOriginalAssetData(from: newItem)
+                    guard let data else { return }
+                    originalImageData = data
+                    if let rawImage = rawDataToUIImageWithCIRAWFilter(data)
                     {
-                        if let rawImage = rawDataToUIImageWithCIFilter(data) {
-                            uiImage = rawImage
-                        } else {
-                            uiImage = image
-                        }
-                        originalImageData = data
-                        updateThumbImage()
+                        uiImage = rawImage
+                    } else if let image = UIImage(data: data) {
+                        uiImage = image
+                    } else {
+                        uiImage = nil
                     }
+                    updateThumbImage()
                 }
             }
         }
@@ -142,16 +145,115 @@ struct ImageThumbView: View {
         }
     }
     
-    func rawDataToUIImageWithCIFilter(_ data: Data) -> UIImage? {
-        guard let rawFilter = CIFilter(imageData: data, options: [CIRAWFilterOption.allowDraftMode: false]) else {
-            return nil
+    func rawDataToUIImageWithCIRAWFilter(_ data: Data) -> UIImage? {
+        
+        // 识别类型作为 hint（有助于正确解析 RAW）
+        var identifierHint: String? = nil
+        var orientationFromEXIF: CGImagePropertyOrientation? = nil
+        if let source = CGImageSourceCreateWithData(data as CFData, nil) {
+            if let type = CGImageSourceGetType(source) {
+                identifierHint = type as String
+            }
+            if let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                let rawValue = props[kCGImagePropertyOrientation] as? UInt32,
+                let ori = CGImagePropertyOrientation(rawValue: rawValue)
+            {
+                orientationFromEXIF = ori
+            }
         }
+        // 优先用 URL 初始化，部分 RAW 在 Data 路径可能只返回低清预览
+        var filter: CIRAWFilter?
+        if let hint = identifierHint, let utType = UTType(hint), let ext = utType.preferredFilenameExtension {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension(ext)
+            do {
+                try data.write(to: url, options: .atomic)
+                filter = CIRAWFilter(imageURL: url)
+            } catch {
+                filter = nil
+            }
+        }
+        if filter == nil {
+            filter = CIRAWFilter(imageData: data, identifierHint: identifierHint)
+        }
+        guard let filter else { return nil }
+        // 全尺寸、禁用草稿、应用方向
+        filter.scaleFactor = 1.0
+        filter.isDraftModeEnabled = false
+        if let o = orientationFromEXIF {
+            filter.orientation = o
+        }
+        // 使用最新解码器，避免回退到兼容模式
+        if let latest = filter.supportedDecoderVersions.last {
+            filter.decoderVersion = latest
+        }
+        
         let context = CIContext()
-        guard let outputImage = rawFilter.outputImage else { return nil }
-        if let cgImage = context.createCGImage(outputImage, from: outputImage.extent) {
-            return UIImage(cgImage: cgImage, scale: displayScale, orientation: .up)
+        guard let ci = filter.outputImage else { return nil }
+        guard let cg = context.createCGImage(ci, from: ci.extent) else { return nil }
+        return UIImage(cgImage: cg, scale: displayScale, orientation: .up)
+    }
+
+    // 使用 PhotoKit 拉取原始资源数据（优先 RAW），避免只拿到嵌入预览
+    private func loadOriginalAssetData(from item: PhotosPickerItem) async -> Data? {
+        // 通过本地标识符获取 PHAsset
+        if let id = item.itemIdentifier {
+            let assets = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil)
+            if let asset = assets.firstObject {
+                // 查找 RAW 资源
+                let resources = PHAssetResource.assetResources(for: asset)
+                let rawExtensions = [
+                    ".dng", ".arw", ".cr2", ".cr3", ".nef", ".raf",
+                    ".orf", ".rw2", ".srw", ".pef", ".crw"
+                ]
+                let rawRes = resources.first { res in
+                    let uti = res.uniformTypeIdentifier.lowercased()
+                    if uti.contains("raw") { return true }
+                    let name = res.originalFilename.lowercased()
+                    return rawExtensions.contains { name.hasSuffix($0) }
+                }
+                if let rawRes {
+                    let opts = PHAssetResourceRequestOptions()
+                    opts.isNetworkAccessAllowed = true
+                    if let data = try? await requestData(for: rawRes, options: opts) {
+                        return data
+                    }
+                }
+                // 回退：请求原图数据（可能是渲染后的 JPEG/HEIC）
+                if let data = try? await requestImageData(asset: asset) { return data }
+            }
         }
         return nil
+    }
+
+    // 拉取 PHAssetResource 的数据
+    private func requestData(for resource: PHAssetResource, options: PHAssetResourceRequestOptions? = nil) async throws -> Data {
+        try await withCheckedThrowingContinuation { cont in
+            let buffer = NSMutableData()
+            PHAssetResourceManager.default().requestData(
+                for: resource,
+                options: options,
+                dataReceivedHandler: { chunk in buffer.append(chunk) },
+                completionHandler: { error in
+                    if let error { cont.resume(throwing: error) }
+                    else { cont.resume(returning: buffer as Data) }
+                }
+            )
+        }
+    }
+
+    // 获取原图数据（可能不是 RAW，但优于小预览）
+    private func requestImageData(asset: PHAsset) async throws -> Data? {
+        try await withCheckedThrowingContinuation { cont in
+            let opts = PHImageRequestOptions()
+            opts.isNetworkAccessAllowed = true
+            opts.deliveryMode = .highQualityFormat
+            opts.version = .original
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: opts) { data, _, _, _ in
+                cont.resume(returning: data)
+            }
+        }
     }
     
     private func updateThumbImage() {
